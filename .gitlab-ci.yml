@@ -107,7 +107,7 @@ deploy:staging:
   image: python:3.14
   script:
     - echo "Deploying to staging..."
-    - echo "Example: Deploy to Elastic Beanstalk or EC2"
+    - echo "Example - Deploy to Elastic Beanstalk or EC2"
   environment:
     name: staging
     url: https://staging.abc-analytics.example.com
