@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon Linux EC2 NGINX Web Server using CloudFormation (Free Tier)
+
+Parameters:
+  KeyName:
+    Description: EC2 KeyPair for SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: london-ec2
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t4g.small
+      - t3.micro
+      - t4g.micro
+      - m7i-flex.large
+
+  LatestAmiId:
+    Description: Amazon Linux 2 AMI
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupDescription: Allow HTTP and SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: StackName
+          Value: !Ref "AWS::StackName"
+
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    DeletionPolicy: Delete
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestAmiId
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: MyWebServerInstance
+        - Key: StackName
+          Value: !Ref "AWS::StackName"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras enable nginx1
+          yum install -y nginx
+          systemctl start nginx
+          systemctl enable nginx
+          echo "<h1>NGINX Web Server deployed using CloudFormation</h1>" > /usr/share/nginx/html/index.html
+
+Outputs:
+  WebServerPublicIP:
+    Description: Public IP of the NGINX Web Server
+    Value: !GetAtt WebServerInstance.PublicIp
