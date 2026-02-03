@@ -53,7 +53,7 @@ Resources:
         - !Ref WebServerSecurityGroup
       Tags:
         - Key: Name
-          Value: MyWebServerInstance
+          Value: webserver
         - Key: StackName
           Value: !Ref "AWS::StackName"
       UserData:
@@ -68,5 +68,5 @@ Resources:
 
 Outputs:
   WebServerPublicIP:
-    Description: Public IP of the NGINX Web Server
+    Description: Public IP of the Web Server (if an EC2 stack was deployed; CI now deploys a containerized Django app)
     Value: !GetAtt WebServerInstance.PublicIp
