@@ -7,7 +7,7 @@ variables:
   AWS_DEFAULT_REGION: "eu-west-1"
   IMAGE_TAG: $CI_COMMIT_SHA
   ECR_REPOSITORY: "webserver"
-  ECR_REGISTRY: "397059225137.dkr.ecr.eu-west-1.amazonaws.com"
+  ECR_REGISTRY: "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
   ECS_SERVICE: "webserver"
   ECS_CLUSTER: "webserver-cluster"
   CFN_STACK_NAME: "webserver-ecs-stack"
@@ -24,7 +24,7 @@ build:
   script:
     - aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_DEFAULT_REGION
     - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-    - docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG django_webserver/
+    - docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f django_webserver/Dockerfile django_webserver/
     - docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
     - docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
     - docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
@@ -41,7 +41,7 @@ deploy:
     - ./aws/install
   script:
     - ECR_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-    - aws cloudformation deploy --template-file ecs-webserver.yaml --stack-name $CFN_STACK_NAME --parameter-overrides ContainerImage=$ECR_IMAGE_URI --capabilities CAPABILITY_NAMED_IAM --region $AWS_DEFAULT_REGION
+    - aws cloudformation deploy --template-file webserver.yaml --stack-name $CFN_STACK_NAME --parameter-overrides ContainerImage=$ECR_IMAGE_URI --capabilities CAPABILITY_NAMED_IAM --region $AWS_DEFAULT_REGION
     - aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment --region $AWS_DEFAULT_REGION
   only:
     - main
