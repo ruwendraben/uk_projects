@@ -1,0 +1,37 @@
+stages:
+  - deploy
+  - destroy
+
+variables:
+  AWS_DEFAULT_REGION: "eu-west-1"
+
+deploy:
+  stage: deploy
+  image: amazonlinux:2
+  before_script:
+    - yum install -y python3-pip unzip curl
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    - aws --version
+    - aws sts get-caller-identity
+  script:
+    - aws cloudformation deploy --stack-name NginxWebServerStackTest --template-file webserver.yaml --parameter-overrides KeyName=london-ec2 InstanceType=t3.micro --capabilities CAPABILITY_IAM
+  only:
+    - main  
+
+destroy:
+  stage: destroy
+  image: amazonlinux:2
+  when: manual
+  before_script:
+    - yum install -y unzip curl
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    - aws --version
+    - aws sts get-caller-identity
+  script:
+    - aws cloudformation delete-stack --stack-name NginxWebServerStackTest --region eu-west-1
+  only:
+    - main
