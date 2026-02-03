@@ -16,7 +16,7 @@ cache:
 # ============== TEST STAGE ==============
 test:unit:
   stage: test
-  image: python:3.14
+  image: python:3.13
   before_script:
     - cd django_webserver
     - pip install -r requirements.txt
@@ -41,7 +41,7 @@ test:unit:
 # ============== SECURITY STAGE ==============
 security:bandit:
   stage: security
-  image: python:3.14
+  image: python:3.13
   before_script:
     - pip install bandit
   script:
@@ -58,7 +58,7 @@ security:bandit:
 
 security:safety:
   stage: security
-  image: python:3.14
+  image: python:3.13
   before_script:
     - cd django_webserver
     - pip install safety
@@ -74,7 +74,7 @@ security:safety:
 
 security:secrets:
   stage: security
-  image: python:3.14
+  image: python:3.13
   before_script:
     - pip install detect-secrets
   script:
@@ -104,7 +104,7 @@ build:docker:
 # ============== DEPLOY STAGE ==============
 deploy:staging:
   stage: deploy
-  image: python:3.14
+  image: python:3.13
   script:
     - echo "Deploying to staging..."
     - echo "Example - Deploy to Elastic Beanstalk or EC2"
@@ -117,7 +117,7 @@ deploy:staging:
 
 deploy:production:
   stage: deploy
-  image: python:3.14
+  image: python:3.13
   script:
     - echo "Deploying to production..."
   environment:
