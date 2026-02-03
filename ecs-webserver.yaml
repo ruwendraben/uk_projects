@@ -17,9 +17,6 @@ Parameters:
     Default: 2
     Description: Number of ECS tasks to run
 
-Variables:
-  Environment: production
-
 Resources:
   # ECR Repository
   WebServerRepository:
