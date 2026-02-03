@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ org.name }} - ABC Data Analytics</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        h1 { margin: 0; }
+        .back { color: #007bff; text-decoration: none; }
+        .back:hover { text-decoration: underline; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { background: white; padding: 20px; margin: 20px 0; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .datasource-card { background: #f9f9f9; padding: 15px; margin: 10px 0; border-left: 4px solid #007bff; display: flex; justify-content: space-between; align-items: start; }
+        .datasource-info h4 { margin: 0 0 5px 0; }
+        .datasource-info p { margin: 5px 0; color: #666; font-size: 14px; }
+        .datasource-actions { display: flex; gap: 10px; }
+        .btn { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #0056b3; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        .form-group { margin: 15px 0; }
+        label { display: block; margin-bottom: 5px; color: #333; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .error { color: red; margin: 10px 0; }
+        .empty { color: #999; text-align: center; padding: 20px; }
+        .alert { padding: 10px; margin: 10px 0; border-radius: 3px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ org.name }}</h1>
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <a href="{% url 'dashboard' %}" class="back">← Back to Dashboard</a>
+                <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" style="background: none; color: #007bff; border: none; cursor: pointer; text-decoration: underline;">Logout</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>Organization Details</h3>
+            <p><strong>Name:</strong> {{ org.name }}</p>
+            <p><strong>Admin Email:</strong> {{ org.admin_email }}</p>
+            <p><strong>Your Role:</strong> {{ org_user.get_role_display }}</p>
+        </div>
+
+        <div class="section">
+            <h3>Data Sources</h3>
+            <div id="alert-container"></div>
+            {% if data_sources %}
+                {% for source in data_sources %}
+                    <div class="datasource-card">
+                        <div class="datasource-info">
+                            <h4>{{ source.name }}</h4>
+                            <p><strong>Type:</strong> {{ source.get_source_type_display }}</p>
+                            <p><strong>Created:</strong> {{ source.created_at|date:"M d, Y" }}</p>
+                        </div>
+                        <div class="datasource-actions">
+                            <button type="button" class="btn" onclick="testConnection({{ source.id }})">Test</button>
+                            <a href="{% url 'explore_datasource' source.id %}" class="btn" style="background: #28a745;">Explore</a>
+                            {% if org_user.role == 'admin' %}
+                                <form method="post" action="{% url 'delete_datasource' source.id %}" style="display: inline;" onsubmit="return confirm('Delete this datasource?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-danger">Delete</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty">
+                    <p>No data sources connected yet.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if org_user.role == 'admin' %}
+            <div class="section">
+                <h3>Add New Data Source</h3>
+                {% if error %}
+                    <div class="error">{{ error }}</div>
+                {% endif %}
+                <form method="post" action="{% url 'add_datasource' org.id %}">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <label for="name">Data Source Name</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="source_type">Type</label>
+                        <select id="source_type" name="source_type" required>
+                            <option value="">-- Select --</option>
+                            <option value="postgresql">PostgreSQL</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="csv">CSV File</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="connection_string">Connection String</label>
+                        <textarea id="connection_string" name="connection_string" rows="3" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace;"></textarea>
+                    </div>
+                    <button type="submit">Add Data Source</button>
+                </form>
+            </div>
+        {% endif %}
+
+        <div class="section">
+            <h3>Team Members</h3>
+            {% if org_members %}
+                <div style="background: #f9f9f9; padding: 10px; border-radius: 3px;">
+                    {% for member in org_members %}
+                        <div style="padding: 8px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between;">
+                            <span>{{ member.user.email }} <strong>({{ member.get_role_display }})</strong></span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty">Just you for now</div>
+            {% endif %}
+
+            {% if org_user.role == 'admin' %}
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <h4>Invite Team Member</h4>
+                    <form method="post" action="{% url 'invite_user' org.id %}">
+                        {% csrf_token %}
+                        <div class="form-group">
+                            <label for="email">Email Address</label>
+                            <input type="email" id="email" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="role">Role</label>
+                            <select id="role" name="role" required>
+                                <option value="viewer">Viewer (read-only)</option>
+                                <option value="admin">Administrator</option>
+                            </select>
+                        </div>
+                        <button type="submit">Send Invite</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function testConnection(datasourceId) {
+            fetch(`/datasource/${datasourceId}/test/`)
+                .then(response => response.json())
+                .then(data => {
+                    const alertDiv = document.getElementById('alert-container');
+                    const alertClass = data.status === 'success' ? 'alert-success' : 'alert-error';
+                    alertDiv.innerHTML = `<div class="alert ${alertClass}">${data.message}</div>`;
+                })
+                .catch(error => {
+                    document.getElementById('alert-container').innerHTML = `<div class="alert alert-error">Error: ${error}</div>`;
+                });
+        }
+    </script>

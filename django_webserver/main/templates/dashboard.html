@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard - ABC Data Analytics</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        h1 { margin: 0; }
+        .logout { color: #007bff; text-decoration: none; }
+        .logout:hover { text-decoration: underline; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .org-card { background: white; padding: 20px; margin: 10px 0; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .org-card h3 { margin: 0 0 10px 0; }
+        .org-card p { margin: 5px 0; color: #666; }
+        .btn { padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 3px; display: inline-block; margin-top: 10px; }
+        .btn:hover { background: #0056b3; }
+        .empty { color: #666; text-align: center; padding: 50px 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Dashboard</h1>
+            <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" style="background: none; color: #007bff; border: none; cursor: pointer; text-decoration: underline; font-size: 16px;">Logout</button>
+            </form>
+        </div>
+
+        <h2>Your Organizations</h2>
+        {% if user_orgs %}
+            {% for org_user in user_orgs %}
+                <div class="org-card">
+                    <h3>{{ org_user.organization.name }}</h3>
+                    <p><strong>Role:</strong> {{ org_user.get_role_display }}</p>
+                    <p><strong>Email:</strong> {{ org_user.organization.admin_email }}</p>
+                    <a href="{% url 'org_detail' org_user.organization.id %}" class="btn">View Details</a>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty">
+                <p>You don't belong to any organizations yet.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
