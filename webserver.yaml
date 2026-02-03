@@ -17,6 +17,14 @@ Parameters:
     Default: 2
     Description: Number of ECS tasks to run
 
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID to deploy into (uses default VPC)
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnet IDs (at least 2 for ALB)
+
 Resources:
   # ECR Repository
   WebServerRepository:
@@ -88,6 +96,7 @@ Resources:
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
+      VpcId: !Ref VpcId
       HealthCheckEnabled: true
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
@@ -205,9 +214,7 @@ Resources:
           AssignPublicIp: ENABLED
           SecurityGroups:
             - !Ref WebServerSecurityGroup
-          Subnets:
-            - !ImportValue DefaultSubnet1
-            - !ImportValue DefaultSubnet2
+          Subnets: !Ref SubnetIds
       LoadBalancers:
         - ContainerName: webserver
           ContainerPort: !Ref ContainerPort

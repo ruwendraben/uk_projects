@@ -41,7 +41,9 @@ deploy:
     - ./aws/install
   script:
     - ECR_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-    - aws cloudformation deploy --template-file webserver.yaml --stack-name $CFN_STACK_NAME --parameter-overrides ContainerImage=$ECR_IMAGE_URI --capabilities CAPABILITY_NAMED_IAM --region $AWS_DEFAULT_REGION
+    - VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text --region $AWS_DEFAULT_REGION)
+    - SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[0:2].SubnetId' --output text --region $AWS_DEFAULT_REGION)
+    - aws cloudformation deploy --template-file webserver.yaml --stack-name $CFN_STACK_NAME --parameter-overrides ContainerImage=$ECR_IMAGE_URI VpcId=$VPC_ID SubnetIds="$SUBNET_IDS" --capabilities CAPABILITY_NAMED_IAM --region $AWS_DEFAULT_REGION
     - aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment --region $AWS_DEFAULT_REGION
   only:
     - main
