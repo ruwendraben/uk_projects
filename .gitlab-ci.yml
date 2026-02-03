@@ -17,6 +17,8 @@ cache:
 test:unit:
   stage: test
   image: python:3.13
+  tags:
+    - docker
   before_script:
     - cd django_webserver
     - pip install -r requirements.txt
@@ -42,6 +44,8 @@ test:unit:
 security:bandit:
   stage: security
   image: python:3.13
+  tags:
+    - docker
   before_script:
     - pip install bandit
   script:
@@ -59,6 +63,8 @@ security:bandit:
 security:safety:
   stage: security
   image: python:3.13
+  tags:
+    - docker
   before_script:
     - cd django_webserver
     - pip install safety
@@ -75,6 +81,8 @@ security:safety:
 security:secrets:
   stage: security
   image: python:3.13
+  tags:
+    - docker
   before_script:
     - pip install detect-secrets
   script:
@@ -90,6 +98,8 @@ build:docker:
   image: docker:26
   services:
     - docker:dind
+  tags:
+    - docker
   before_script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
@@ -105,6 +115,8 @@ build:docker:
 deploy:staging:
   stage: deploy
   image: python:3.13
+  tags:
+    - docker
   script:
     - echo "Deploying to staging..."
     - echo "Example - Deploy to Elastic Beanstalk or EC2"
@@ -118,6 +130,8 @@ deploy:staging:
 deploy:production:
   stage: deploy
   image: python:3.13
+  tags:
+    - docker
   script:
     - echo "Deploying to production..."
   environment:
