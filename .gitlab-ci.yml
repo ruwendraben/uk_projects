@@ -7,6 +7,7 @@ variables:
   AWS_DEFAULT_REGION: "eu-west-1"
   IMAGE_TAG: $CI_COMMIT_SHA
   ECR_REPOSITORY: "webserver"
+  ECR_REGISTRY: "397059225137.dkr.ecr.eu-west-1.amazonaws.com"
   ECS_SERVICE: "webserver"
   ECS_CLUSTER: "webserver-cluster"
   CFN_STACK_NAME: "webserver-ecs-stack"
