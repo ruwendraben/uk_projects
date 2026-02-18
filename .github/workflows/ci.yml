@@ -121,33 +121,50 @@ jobs:
       - run: detect-secrets scan --baseline .secrets.baseline || echo "Secrets scan complete"
         continue-on-error: true
 
-  # ============== BUILD (manual via workflow_dispatch) ==============
+  # ============== BUILD TO ECR ==============
   build:
-    name: Build Docker
+    name: Build Docker to ECR
     runs-on: ubuntu-latest
     needs: [test, security-bandit, security-safety, security-secrets]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push' || github.event_name == 'workflow_dispatch' && github.event.inputs.do_build == 'true'
     permissions:
       contents: read
-      packages: write
+    env:
+      AWS_REGION: eu-west-2
+      ECR_REPO_NAME: webserver
+    outputs:
+      image_uri: ${{ steps.ecr-info.outputs.image_uri }}
+      account: ${{ steps.ecr-info.outputs.account }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: django_webserver
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
-            ghcr.io/${{ github.repository }}:latest
+      - name: Create ECR repository if not exists
+        id: ecr-info
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.ECR_REPO_NAME }} 2>/dev/null || \
+            aws ecr create-repository --repository-name ${{ env.ECR_REPO_NAME }} --image-scanning-configuration scanOnPush=false
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          echo "account=$ACCOUNT" >> $GITHUB_OUTPUT
+          echo "image_uri=$ACCOUNT.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest" >> $GITHUB_OUTPUT
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-info.outputs.account }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }} django_webserver/
+          docker tag $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }} $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }}
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
 
   # ============== DEPLOY EC2 + ALB (London eu-west-2, manual) ==============
   deploy-ec2-staging:
@@ -158,7 +175,6 @@ jobs:
     environment: staging
     env:
       AWS_REGION: eu-west-2
-      ECR_REPO_NAME: webserver
       STACK_NAME: webserver-ec2-staging
       EC2_KEY_NAME: ${{ secrets.AWS_EC2_KEY_NAME || 'london-ec2' }}
     steps:
@@ -181,34 +197,6 @@ jobs:
           echo "subnet2=${SUBNETS[1]}" >> $GITHUB_OUTPUT
           echo "VPC: $VPC_ID, Subnets: ${SUBNETS[0]} ${SUBNETS[1]}"
 
-      - name: Create ECR repository if not exists
-        id: ecr
-        run: |
-          aws ecr describe-repositories --repository-names ${{ env.ECR_REPO_NAME }} 2>/dev/null || \
-            aws ecr create-repository --repository-name ${{ env.ECR_REPO_NAME }} --image-scanning-configuration scanOnPush=false
-          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-          echo "account=$ACCOUNT" >> $GITHUB_OUTPUT
-          echo "image_uri=$ACCOUNT.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest" >> $GITHUB_OUTPUT
-
-      - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push Docker image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.ecr.outputs.account }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-        run: |
-          docker build -t $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest django_webserver/
-          docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
-
-      - name: Clean up untagged ECR images
-        run: |
-          aws ecr describe-images --repository-name ${{ env.ECR_REPO_NAME }} --query 'imageDetails[?imageTagsAttributeList==null].imageDigest' --output text | awk '{for(i=1;i<=NF;i++) print $i}' | while read imageDigest; do
-            if [ ! -z "$imageDigest" ]; then
-              echo "Deleting untagged image: $imageDigest"
-              aws ecr batch-delete-image --repository-name ${{ env.ECR_REPO_NAME }} --image-ids "imageDigest=$imageDigest" || echo "Failed to delete $imageDigest"
-            fi
-          done
-
       - name: Deploy CloudFormation stack (EC2 + ALB)
         run: |
           aws cloudformation deploy \
@@ -216,7 +204,7 @@ jobs:
             --stack-name ${{ env.STACK_NAME }} \
             --region ${{ env.AWS_REGION }} \
             --parameter-overrides \
-              ContainerImageUri=${{ steps.ecr.outputs.image_uri }} \
+              ContainerImageUri=${{ needs.build.outputs.image_uri }} \
               VpcId=${{ steps.network.outputs.vpc_id }} \
               SubnetId=${{ steps.network.outputs.subnet1 }} \
               ALBSubnet1=${{ steps.network.outputs.subnet1 }} \
