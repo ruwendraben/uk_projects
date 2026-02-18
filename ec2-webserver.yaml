@@ -169,6 +169,9 @@ Resources:
       Protocol: HTTP
       TargetType: instance
       VpcId: !Ref VpcId
+      Targets:
+        - Id: !Ref WebServerInstance
+          Port: !Ref ContainerPort
       HealthCheckEnabled: true
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
@@ -192,14 +195,6 @@ Resources:
       LoadBalancerArn: !Ref WebServerALB
       Port: 80
       Protocol: HTTP
-
-  # Register EC2 instance with target group
-  TargetGroupAttachment:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
-    Properties:
-      TargetGroupArn: !Ref ALBTargetGroup
-      TargetId: !Ref WebServerInstance
-      Port: !Ref ContainerPort
 
 Outputs:
   LoadBalancerDNS:

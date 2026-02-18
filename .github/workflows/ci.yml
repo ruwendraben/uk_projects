@@ -6,8 +6,14 @@ name: CI
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - '*.yaml'
+      - '*.yml'
   pull_request:
     branches: [master]
+    paths-ignore:
+      - '*.yaml'
+      - '*.yml'
   workflow_dispatch:
     inputs:
       do_build:
