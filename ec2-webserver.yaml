@@ -87,8 +87,21 @@ Resources:
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyName: ECRReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*'
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -147,7 +160,7 @@ Resources:
         - Key: Name
           Value: webserver-ec2-alb
 
-  # Target group (instance type, port 8000)
+  # Target group (instance type, port 8000)  
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -156,9 +169,6 @@ Resources:
       Protocol: HTTP
       TargetType: instance
       VpcId: !Ref VpcId
-      Targets:
-        - Id: !Ref WebServerInstance
-          Port: !Ref ContainerPort
       HealthCheckEnabled: true
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
@@ -168,6 +178,9 @@ Resources:
       UnhealthyThresholdCount: 3
       Matcher:
         HttpCode: 200-299
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-tg'
 
   # ALB listener - port 80 -> target group
   ALBListener:
@@ -179,6 +192,14 @@ Resources:
       LoadBalancerArn: !Ref WebServerALB
       Port: 80
       Protocol: HTTP
+
+  # Register EC2 instance with target group
+  TargetGroupAttachment:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Properties:
+      TargetGroupArn: !Ref ALBTargetGroup
+      TargetId: !Ref WebServerInstance
+      Port: !Ref ContainerPort
 
 Outputs:
   LoadBalancerDNS:
