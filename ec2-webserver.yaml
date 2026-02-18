@@ -97,6 +97,39 @@ Resources:
         - !Ref EC2Role
       InstanceProfileName: !Sub 'webserver-ec2-profile-${AWS::StackName}'
 
+  # EC2 instance - t3.micro (free tier eligible in eu-west-2)
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref EC2SecurityGroup
+          SubnetId: !Ref SubnetId
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              yum update -y
+              yum install -y docker
+              systemctl enable docker
+              systemctl start docker
+              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+              docker pull ${ImageUri}
+              docker run -d --name app -p ${Port}:${Port} -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped ${ImageUri}
+            - ImageUri: !Ref ContainerImageUri
+              Port: !Ref ContainerPort
+      Tags:
+        - Key: Name
+          Value: webserver-ec2
+
   # Application Load Balancer
   WebServerALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -132,9 +165,6 @@ Resources:
       UnhealthyThresholdCount: 3
       Matcher:
         HttpCode: 200-299
-      Targets:
-        - Id: !Ref WebServerInstance
-          Port: !Ref ContainerPort
 
   # ALB listener - port 80 -> target group
   ALBListener:
@@ -147,39 +177,13 @@ Resources:
       Port: 80
       Protocol: HTTP
 
-  # EC2 instance - t3.micro (free tier eligible in eu-west-2)
-  WebServerInstance:
-    Type: AWS::EC2::Instance
-    DependsOn: ALBListener
+  # Register EC2 instance with target group
+  TargetGroupAttachment:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
     Properties:
-      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
-      InstanceType: t3.micro
-      KeyName: !Ref KeyName
-      IamInstanceProfile: !Ref EC2InstanceProfile
-      NetworkInterfaces:
-        - AssociatePublicIpAddress: true
-          DeviceIndex: 0
-          GroupSet:
-            - !Ref EC2SecurityGroup
-          SubnetId: !Ref SubnetId
-      UserData:
-        Fn::Base64:
-          Fn::Sub:
-            - |
-              #!/bin/bash
-              set -e
-              yum update -y
-              yum install -y docker
-              systemctl enable docker
-              systemctl start docker
-              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
-              docker pull ${ImageUri}
-              docker run -d --name app -p ${Port}:${Port} -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped ${ImageUri}
-            - ImageUri: !Ref ContainerImageUri
-              Port: !Ref ContainerPort
-      Tags:
-        - Key: Name
-          Value: webserver-ec2
+      TargetGroupArn: !Ref ALBTargetGroup
+      TargetId: !Ref WebServerInstance
+      Port: !Ref ContainerPort
 
 Outputs:
   LoadBalancerDNS:
