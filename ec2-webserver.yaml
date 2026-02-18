@@ -1,0 +1,207 @@
+# EC2 + ALB stack for London (eu-west-2) - single instance, free-tier friendly
+# Deploy with: aws cloudformation deploy --template-file ec2-webserver.yaml --stack-name webserver-ec2 --region eu-west-2 --parameter-overrides ...
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Single EC2 instance behind ALB running containerized Django app (London eu-west-2)
+
+Parameters:
+  ContainerImageUri:
+    Type: String
+    Description: Full Docker image URI (e.g. 123456789012.dkr.ecr.eu-west-2.amazonaws.com/webserver:latest)
+    NoEcho: false
+
+  ContainerPort:
+    Type: Number
+    Default: 8000
+    Description: Port the app listens on inside the container
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into (e.g. default VPC in eu-west-2)
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet for the EC2 instance (must have internet for ECR pull)
+
+  ALBSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First subnet for ALB (use 2 different AZs for ALB subnets)
+
+  ALBSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second subnet for ALB (different AZ from ALBSubnet1)
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH key pair name for EC2 (e.g. london-ec2). Use the matching .pem to log in.
+    Default: london-ec2
+
+Resources:
+  # Security group for EC2 - allow app port from ALB + SSH for login
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 webserver
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH for admin login
+      Tags:
+        - Key: Name
+          Value: webserver-ec2-sg
+
+  # Security group for ALB - allow 80/443 from internet
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: webserver-ec2-alb-sg
+
+  # IAM role for EC2 - pull images from ECR
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerRegistryReadOnly
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+      InstanceProfileName: !Sub 'webserver-ec2-profile-${AWS::StackName}'
+
+  # Application Load Balancer
+  WebServerALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub 'webserver-ec2-alb-${AWS::StackName}'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref ALBSubnet1
+        - !Ref ALBSubnet2
+      Tags:
+        - Key: Name
+          Value: webserver-ec2-alb
+
+  # Target group (instance type, port 8000)
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub 'webserver-ec2-tg-${AWS::StackName}'
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: instance
+      VpcId: !Ref VpcId
+      HealthCheckEnabled: true
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200-299
+
+  # Register EC2 with target group (done after instance is created)
+  ALBTargetGroupAttachment:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    DependsOn: WebServerInstance
+    Properties:
+      TargetGroupArn: !Ref ALBTargetGroup
+      TargetId: !Ref WebServerInstance
+      Port: !Ref ContainerPort
+
+  # ALB listener - port 80 -> target group
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref WebServerALB
+      Port: 80
+      Protocol: HTTP
+
+  # EC2 instance - t3.micro (free tier eligible in eu-west-2)
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: ALBListener
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref EC2SecurityGroup
+          SubnetId: !Ref SubnetId
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              yum update -y
+              yum install -y docker
+              systemctl enable docker
+              systemctl start docker
+              aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+              docker pull ${ImageUri}
+              docker run -d --name app -p ${Port}:${Port} -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped ${ImageUri}
+            - ImageUri: !Ref ContainerImageUri
+              Port: !Ref ContainerPort
+      Tags:
+        - Key: Name
+          Value: webserver-ec2
+
+Outputs:
+  LoadBalancerDNS:
+    Description: ALB DNS name - use this URL to access your app
+    Value: !GetAtt WebServerALB.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-ALBDNS'
+
+  LoadBalancerURL:
+    Description: Full URL to access the app (HTTP)
+    Value: !Sub 'http://${WebServerALB.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ALBURL'
+
+  EC2InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref WebServerInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
