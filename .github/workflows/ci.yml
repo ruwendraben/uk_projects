@@ -166,6 +166,11 @@ jobs:
           docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }}
           docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
 
+      - name: Clean up Docker images
+        if: always()
+        run: |
+          docker image prune -af
+
   # ============== DEPLOY EC2 + ALB (London eu-west-2, manual) ==============
   deploy-ec2-staging:
     name: Deploy EC2 staging (London)
@@ -212,6 +217,16 @@ jobs:
               KeyName=${{ env.EC2_KEY_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+
+      - name: Clean up untagged ECR images
+        if: always()
+        run: |
+          aws ecr describe-images --repository-name webserver --region ${{ env.AWS_REGION }} --query 'imageDetails[?imageTags==null].imageDigest' --output text | awk '{for(i=1;i<=NF;i++) print $i}' | while read imageDigest; do
+            if [ ! -z "$imageDigest" ]; then
+              echo "Deleting untagged image: $imageDigest"
+              aws ecr batch-delete-image --repository-name webserver --region ${{ env.AWS_REGION }} --image-ids imageDigest=$imageDigest || echo "Failed to delete $imageDigest"
+            fi
+          done
 
       - name: Output ALB DNS and SSH
         run: |
