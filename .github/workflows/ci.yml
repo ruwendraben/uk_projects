@@ -142,22 +142,85 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:latest
 
-  # ============== DEPLOY (manual via workflow_dispatch) ==============
-  deploy-staging:
-    name: Deploy staging
+  # ============== DEPLOY EC2 + ALB (London eu-west-2, manual) ==============
+  deploy-ec2-staging:
+    name: Deploy EC2 staging (London)
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && (github.event.inputs.deploy_staging == 'true' || github.event.inputs.deploy_production == 'true')
     environment: staging
+    env:
+      AWS_REGION: eu-west-2
+      ECR_REPO_NAME: webserver
+      STACK_NAME: webserver-ec2-staging
+      EC2_KEY_NAME: ${{ secrets.AWS_EC2_KEY_NAME || 'london-ec2' }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Deploying to staging..."
-      - run: echo "Example - Deploy to Elastic Beanstalk or EC2"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get default VPC and subnets
+        id: network
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query "Vpcs[0].VpcId" --output text)
+          echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+          SUBNETS=($(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[*].SubnetId" --output text))
+          echo "subnet1=${SUBNETS[0]}" >> $GITHUB_OUTPUT
+          echo "subnet2=${SUBNETS[1]}" >> $GITHUB_OUTPUT
+          echo "VPC: $VPC_ID, Subnets: ${SUBNETS[0]} ${SUBNETS[1]}"
+
+      - name: Create ECR repository if not exists
+        id: ecr
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.ECR_REPO_NAME }} 2>/dev/null || \
+            aws ecr create-repository --repository-name ${{ env.ECR_REPO_NAME }} --image-scanning-configuration scanOnPush=false
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          echo "account=$ACCOUNT" >> $GITHUB_OUTPUT
+          echo "image_uri=$ACCOUNT.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest" >> $GITHUB_OUTPUT
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.account }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest django_webserver/
+          docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
+
+      - name: Deploy CloudFormation stack (EC2 + ALB)
+        run: |
+          aws cloudformation deploy \
+            --template-file ec2-webserver.yaml \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --parameter-overrides \
+              ContainerImageUri=${{ steps.ecr.outputs.image_uri }} \
+              VpcId=${{ steps.network.outputs.vpc_id }} \
+              SubnetId=${{ steps.network.outputs.subnet1 }} \
+              ALBSubnet1=${{ steps.network.outputs.subnet1 }} \
+              ALBSubnet2=${{ steps.network.outputs.subnet2 }} \
+              KeyName=${{ env.EC2_KEY_NAME }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Output ALB DNS and SSH
+        run: |
+          ALB_DNS=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" --output text --region ${{ env.AWS_REGION }})
+          INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='EC2InstanceId'].OutputValue" --output text --region ${{ env.AWS_REGION }})
+          PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text --region ${{ env.AWS_REGION }})
+          echo "App URL: http://$ALB_DNS"
+          echo "SSH: ssh -i london-ec2.pem ec2-user@$PUBLIC_IP"
 
   deploy-production:
     name: Deploy production
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_production == 'true'
-    needs: [deploy-staging]
+    needs: [deploy-ec2-staging]
     environment: production
     steps:
       - uses: actions/checkout@v4
