@@ -132,15 +132,9 @@ Resources:
       UnhealthyThresholdCount: 3
       Matcher:
         HttpCode: 200-299
-
-  # Register EC2 with target group (done after instance is created)
-  ALBTargetGroupAttachment:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
-    DependsOn: WebServerInstance
-    Properties:
-      TargetGroupArn: !Ref ALBTargetGroup
-      TargetId: !Ref WebServerInstance
-      Port: !Ref ContainerPort
+      Targets:
+        - Id: !Ref WebServerInstance
+          Port: !Ref ContainerPort
 
   # ALB listener - port 80 -> target group
   ALBListener:
