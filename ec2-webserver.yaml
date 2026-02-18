@@ -147,7 +147,7 @@ Resources:
   WebServerALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub 'webserver-ec2-alb-${AWS::StackName}'
+      Name: !Sub 'alb-${AWS::StackName}'
       Type: application
       Scheme: internet-facing
       IpAddressType: ipv4
@@ -164,7 +164,7 @@ Resources:
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub 'webserver-ec2-tg-${AWS::StackName}'
+      Name: !Sub 'tg-${AWS::StackName}'
       Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: instance
