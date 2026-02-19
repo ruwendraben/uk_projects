@@ -171,6 +171,18 @@ jobs:
         run: |
           docker image prune -af
 
+      - name: Clean up untagged ECR images
+        if: always()
+        env:
+          AWS_REGION: eu-west-2
+        run: |
+          aws ecr describe-images --repository-name webserver --region ${{ env.AWS_REGION }} --query 'imageDetails[?imageTags==null].imageDigest' --output text | tr '\t' '\n' | while read imageDigest; do
+            if [ ! -z "$imageDigest" ]; then
+              echo "Deleting untagged image: $imageDigest"
+              aws ecr batch-delete-image --repository-name webserver --region ${{ env.AWS_REGION }} --image-ids imageDigest=$imageDigest || echo "Failed to delete $imageDigest"
+            fi
+          done
+
   # ============== DEPLOY EC2 + ALB (London eu-west-2, manual) ==============
   deploy-ec2-staging:
     name: Deploy EC2 staging (London)
