@@ -102,6 +102,8 @@ Resources:
                 Action:
                   - ecr:GetAuthorizationToken
                 Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
