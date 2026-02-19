@@ -173,14 +173,14 @@ Resources:
         - Id: !Ref WebServerInstance
           Port: !Ref ContainerPort
       HealthCheckEnabled: true
-      HealthCheckPath: /
+      HealthCheckPath: /health/
       HealthCheckProtocol: HTTP
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       Matcher:
-        HttpCode: 200-299
+        HttpCode: 200
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-tg'

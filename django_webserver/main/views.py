@@ -3,9 +3,17 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login as auth_login
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse, JsonResponse
 from .models import Organization, OrganizationUser, DataSource
 import sqlalchemy
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def health_check(request):
+    """Health check endpoint for ALB - no auth required."""
+    return HttpResponse("OK", status=200)
 
 
 def index(request):
