@@ -135,7 +135,7 @@ Resources:
       InstanceId: !Ref WebServerInstance
       AllocationId: !GetAtt AppElasticIP.AllocationId
 
-  # CloudFront Distribution pointing to Elastic IP
+  # CloudFront Distribution pointing to EC2 public DNS
   AppCloudFront:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -144,7 +144,7 @@ Resources:
         HttpVersion: http2and3
         Origins:
           - Id: EC2Origin
-            DomainName: !Ref AppElasticIP
+            DomainName: !GetAtt WebServerInstance.PublicDnsName
             CustomOriginConfig:
               HTTPPort: !Ref ContainerPort
               OriginProtocolPolicy: http-only
