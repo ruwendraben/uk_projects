@@ -2,7 +2,7 @@
 # Deploy with: aws cloudformation deploy --template-file ec2-webserver.yaml --stack-name webserver-ec2 --region eu-west-2 --parameter-overrides ...
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Single EC2 instance behind ALB running containerized Django app (London eu-west-2)
+Description: Single EC2 instance with CloudFront CDN running containerized Django app (London eu-west-2)
 
 Parameters:
   ContainerImageUri:
@@ -23,31 +23,10 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
     Description: Public subnet for the EC2 instance (must have internet for ECR pull)
 
-  ALBSubnet1:
-    Type: AWS::EC2::Subnet::Id
-    Description: First subnet for ALB (use 2 different AZs for ALB subnets)
-
-  ALBSubnet2:
-    Type: AWS::EC2::Subnet::Id
-    Description: Second subnet for ALB (different AZ from ALBSubnet1)
-
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: SSH key pair name for EC2 (e.g. london-ec2). Use the matching .pem to log in.
     Default: london-ec2
-
-  DomainName:
-    Type: String
-    Description: Domain name for the application (e.g., app.example.com). Leave empty skip DNS setup.
-    Default: ""
-
-  HostedZoneId:
-    Type: String
-    Description: Route 53 Hosted Zone ID for your domain. Leave empty to skip DNS setup.
-    Default: ""
-
-Conditions:
-  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
 
 Resources:
   # Static Elastic IP for EC2
@@ -59,19 +38,7 @@ Resources:
         - Key: Name
           Value: webserver-eip
 
-  # DNS Record pointing to Elastic IP
-  AppDNSRecord:
-    Type: AWS::Route53::RecordSet
-    Condition: HasDomain
-    Properties:
-      HostedZoneId: !Ref HostedZoneId
-      Name: !Ref DomainName
-      Type: A
-      TTL: 300
-      ResourceRecords:
-        - !Ref AppElasticIP
-
-  # Security group for EC2 - allow app port from ALB + SSH for login
+  # Security group for EC2 - allow app port + SSH
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -81,7 +48,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: !Ref ContainerPort
           ToPort: !Ref ContainerPort
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          CidrIp: 0.0.0.0/0
+          Description: Django app port
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
@@ -90,25 +58,6 @@ Resources:
       Tags:
         - Key: Name
           Value: webserver-ec2-sg
-
-  # Security group for ALB - allow 80/443 from internet
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Application Load Balancer
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: webserver-ec2-alb-sg
 
   # IAM role for EC2 - pull images from ECR
   EC2Role:
@@ -160,8 +109,6 @@ Resources:
           GroupSet:
             - !Ref EC2SecurityGroup
           SubnetId: !Ref SubnetId
-      # Associate the Elastic IP
-      EipAllocationId: !GetAtt AppElasticIP.AllocationId
       UserData:
         Fn::Base64:
           Fn::Sub:
@@ -181,86 +128,71 @@ Resources:
         - Key: Name
           Value: webserver-ec2
 
-  # Application Load Balancer
-  WebServerALB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  # Associate Elastic IP to EC2 instance
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
     Properties:
-      Name: !Sub 'alb-${AWS::StackName}'
-      Type: application
-      Scheme: internet-facing
-      IpAddressType: ipv4
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-      Subnets:
-        - !Ref ALBSubnet1
-        - !Ref ALBSubnet2
-      Tags:
-        - Key: Name
-          Value: webserver-ec2-alb
+      InstanceId: !Ref WebServerInstance
+      AllocationId: !GetAtt AppElasticIP.AllocationId
 
-  # Target group (instance type, port 8000)  
-  ALBTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  # CloudFront Distribution pointing to Elastic IP
+  AppCloudFront:
+    Type: AWS::CloudFront::Distribution
     Properties:
-      Name: !Sub 'tg-${AWS::StackName}'
-      Port: !Ref ContainerPort
-      Protocol: HTTP
-      TargetType: instance
-      VpcId: !Ref VpcId
-      Targets:
-        - Id: !Ref WebServerInstance
-          Port: !Ref ContainerPort
-      HealthCheckEnabled: true
-      HealthCheckPath: /health/
-      HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      Matcher:
-        HttpCode: 200
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-tg'
-
-  # ALB listener - port 80 -> target group
-  ALBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref ALBTargetGroup
-      LoadBalancerArn: !Ref WebServerALB
-      Port: 80
-      Protocol: HTTP
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2and3
+        Origins:
+          - Id: EC2Origin
+            DomainName: !Sub '${AppElasticIP}:${ContainerPort}'
+            CustomOriginConfig:
+              HTTPPort: !Ref ContainerPort
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+            Headers:
+              - '*'
+          TargetOriginId: EC2Origin
+          ViewerProtocolPolicy: allow-all
+        PriceClass: PriceClass_100
 
 Outputs:
   ElasticIP:
-    Description: Static IP address for EC2 instance (free tier friendly)
+    Description: Static IP address (backup access)
     Value: !Ref AppElasticIP
     Export:
       Name: !Sub '${AWS::StackName}-ElasticIP'
 
   DirectAppURL:
-    Description: Direct access via Elastic IP (no ALB)
+    Description: Direct access via Elastic IP
     Value: !Sub 'http://${AppElasticIP}:${ContainerPort}'
 
-  AppDomain:
-    Condition: HasDomain
-    Description: Access app via custom domain
-    Value: !Sub 'http://${DomainName}:${ContainerPort}'
-
-  LoadBalancerDNS:
-    Description: ALB DNS name - use this URL to access your app
-    Value: !GetAtt WebServerALB.DNSName
+  CloudFrontDomain:
+    Description: CloudFront static domain (never changes)
+    Value: !GetAtt AppCloudFront.DomainName
     Export:
-      Name: !Sub '${AWS::StackName}-ALBDNS'
+      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
 
-  LoadBalancerURL:
-    Description: Full URL to access the app via ALB (HTTP)
-    Value: !Sub 'http://${WebServerALB.DNSName}'
+  CloudFrontURL:
+    Description: Access via CloudFront (add as CNAME in Cloudflare)
+    Value: !Sub 'http://${AppCloudFront.DomainName}'
     Export:
-      Name: !Sub '${AWS::StackName}-ALBURL'
+      Name: !Sub '${AWS::StackName}-CloudFrontURL'
 
   EC2InstanceId:
     Description: EC2 instance ID

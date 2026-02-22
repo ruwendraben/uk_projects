@@ -246,7 +246,7 @@ jobs:
           echo "subnet2=${SUBNETS[1]}" >> $GITHUB_OUTPUT
           echo "VPC: $VPC_ID, Subnets: ${SUBNETS[0]} ${SUBNETS[1]}"
 
-      - name: Deploy CloudFormation stack (EC2 + ALB)
+      - name: Deploy CloudFormation stack (EC2 + CloudFront)
         run: |
           aws cloudformation deploy \
             --template-file ec2-webserver.yaml \
@@ -256,11 +256,7 @@ jobs:
               ContainerImageUri=${{ needs.build.outputs.image_uri }} \
               VpcId=${{ steps.network.outputs.vpc_id }} \
               SubnetId=${{ steps.network.outputs.subnet1 }} \
-              ALBSubnet1=${{ steps.network.outputs.subnet1 }} \
-              ALBSubnet2=${{ steps.network.outputs.subnet2 }} \
               KeyName=${{ env.EC2_KEY_NAME }} \
-              DomainName="${{ secrets.STAGING_DOMAIN || '' }}" \
-              HostedZoneId="${{ secrets.ROUTE53_ZONE_ID || '' }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 
@@ -276,12 +272,12 @@ jobs:
 
       - name: Output deployment info
         run: |
-          ALB_DNS=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" --output text --region ${{ env.AWS_REGION }})
+          CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='CloudFrontURL'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           ELASTIC_IP=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='ElasticIP'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='EC2InstanceId'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text --region ${{ env.AWS_REGION }})
-          echo "✅ Direct URL: http://$ELASTIC_IP:8000"
-          echo "✅ ALB URL: http://$ALB_DNS"
+          echo "✅ CloudFront URL: $CLOUDFRONT_URL"
+          echo "✅ Direct IP (backup): http://$ELASTIC_IP:8000"
           echo "✅ SSH: ssh -i london-ec2.pem ec2-user@$PUBLIC_IP"
 
   deploy-production:
