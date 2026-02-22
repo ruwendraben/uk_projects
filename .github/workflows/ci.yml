@@ -157,7 +157,22 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Check if code changed
+        id: code_changed
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Force build via manual trigger"
+          elif git diff --quiet origin/master HEAD -- django_webserver/ Dockerfile requirements.txt 2>/dev/null; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No code changes detected, skipping build"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Code changes detected, building image"
+          fi
+
       - name: Build and push Docker image to ECR
+        if: steps.code_changed.outputs.changed == 'true'
         env:
           ECR_REGISTRY: ${{ steps.ecr-info.outputs.account }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
         run: |
@@ -165,6 +180,10 @@ jobs:
           docker tag $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }} $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
           docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ github.sha }}
           docker push $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest
+
+      - name: Reuse existing image
+        if: steps.code_changed.outputs.changed == 'false'
+        run: echo "⏭️  No code changes, reusing latest image from ECR"
 
       - name: Clean up Docker images
         if: always()
@@ -263,12 +282,10 @@ jobs:
 
       - name: Output deployment info
         run: |
-          CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='CloudFrontURL'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           ELASTIC_IP=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='ElasticIP'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='EC2InstanceId'].OutputValue" --output text --region ${{ env.AWS_REGION }})
           PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text --region ${{ env.AWS_REGION }})
-          echo "✅ CloudFront URL: $CLOUDFRONT_URL"
-          echo "✅ Direct IP (backup): http://$ELASTIC_IP:8000"
+          echo "✅ App URL: http://$ELASTIC_IP:8000"
           echo "✅ SSH: ssh -i london-ec2.pem ec2-user@$PUBLIC_IP"
 
   deploy-production:

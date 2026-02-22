@@ -2,7 +2,7 @@
 # Deploy with: aws cloudformation deploy --template-file ec2-webserver.yaml --stack-name webserver-ec2 --region eu-west-2 --parameter-overrides ...
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Single EC2 instance with CloudFront CDN running containerized Django app (London eu-west-2)
+Description: Single EC2 instance with Elastic IP running containerized Django app (London eu-west-2)
 
 Parameters:
   ContainerImageUri:
@@ -135,44 +135,6 @@ Resources:
       InstanceId: !Ref WebServerInstance
       AllocationId: !GetAtt AppElasticIP.AllocationId
 
-  # CloudFront Distribution pointing to EC2 public DNS
-  AppCloudFront:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Enabled: true
-        HttpVersion: http2and3
-        Origins:
-          - Id: EC2Origin
-            DomainName: !GetAtt WebServerInstance.PublicDnsName
-            CustomOriginConfig:
-              HTTPPort: !Ref ContainerPort
-              OriginProtocolPolicy: http-only
-              OriginReadTimeout: 30
-              OriginKeepaliveTimeout: 5
-        DefaultCacheBehavior:
-          AllowedMethods:
-            - GET
-            - HEAD
-            - OPTIONS
-            - PUT
-            - POST
-            - PATCH
-            - DELETE
-          CachedMethods:
-            - GET
-            - HEAD
-          Compress: true
-          ForwardedValues:
-            QueryString: true
-            Cookies:
-              Forward: all
-            Headers:
-              - '*'
-          TargetOriginId: EC2Origin
-          ViewerProtocolPolicy: allow-all
-        PriceClass: PriceClass_100
-
 Outputs:
   ElasticIP:
     Description: Static IP address (backup access)
@@ -183,18 +145,6 @@ Outputs:
   DirectAppURL:
     Description: Direct access via Elastic IP
     Value: !Sub 'http://${AppElasticIP}:${ContainerPort}'
-
-  CloudFrontDomain:
-    Description: CloudFront static domain (never changes)
-    Value: !GetAtt AppCloudFront.DomainName
-    Export:
-      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
-
-  CloudFrontURL:
-    Description: Access via CloudFront (add as CNAME in Cloudflare)
-    Value: !Sub 'http://${AppCloudFront.DomainName}'
-    Export:
-      Name: !Sub '${AWS::StackName}-CloudFrontURL'
 
   EC2InstanceId:
     Description: EC2 instance ID
