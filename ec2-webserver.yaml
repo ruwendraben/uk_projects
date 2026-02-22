@@ -144,10 +144,12 @@ Resources:
         HttpVersion: http2and3
         Origins:
           - Id: EC2Origin
-            DomainName: !Sub '${AppElasticIP}'
+            DomainName: !GetAtt WebServerInstance.PublicDnsName
             CustomOriginConfig:
               HTTPPort: !Ref ContainerPort
               OriginProtocolPolicy: http-only
+              OriginReadTimeout: 30
+              OriginKeepaliveTimeout: 5
         DefaultCacheBehavior:
           AllowedMethods:
             - GET
