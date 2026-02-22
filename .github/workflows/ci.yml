@@ -171,38 +171,6 @@ jobs:
         run: |
           docker image prune -af
 
-      - name: Deploy to EC2 via SSM
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        env:
-          AWS_REGION: eu-west-2
-          STACK_NAME: webserver-ec2-staging
-        run: |
-          INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --region ${{ env.AWS_REGION }} --query 'Stacks[0].Outputs[?OutputKey==`EC2InstanceId`].OutputValue' --output text 2>/dev/null || echo "")
-          
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "Stack not found yet, skipping deployment"
-            exit 0
-          fi
-          
-          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-          ECR_REGISTRY="$ACCOUNT.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-          IMAGE_URI="$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:latest"
-          
-          echo "Deploying to instance: $INSTANCE_ID"
-          echo "Image URI: $IMAGE_URI"
-          
-          aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --instance-ids "$INSTANCE_ID" \
-            --region ${{ env.AWS_REGION }} \
-            --parameters 'commands=[
-              "aws ecr get-login-password --region '"${{ env.AWS_REGION }}"' | docker login --username AWS --password-stdin '"$ECR_REGISTRY"'",
-              "docker pull '"$IMAGE_URI"'",
-              "docker stop app || true",
-              "docker rm app || true",
-              "docker run -d --name app -p 8000:8000 -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped '"$IMAGE_URI"'"
-            ]'
-
       - name: Clean up untagged ECR images
         if: always()
         env:
@@ -259,6 +227,29 @@ jobs:
               KeyName=${{ env.EC2_KEY_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+
+      - name: Update Docker container via SSM
+        run: |
+          INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --query "Stacks[0].Outputs[?OutputKey=='EC2InstanceId'].OutputValue" --output text --region ${{ env.AWS_REGION }})
+          
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" == "None" ]; then
+            echo "⚠️  Instance not found, skipping container update"
+            exit 0
+          fi
+          
+          echo "✅ Updating container on instance: $INSTANCE_ID"
+          
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "$INSTANCE_ID" \
+            --region ${{ env.AWS_REGION }} \
+            --parameters 'commands=[
+              "aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ needs.build.outputs.account }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com",
+              "docker pull ${{ needs.build.outputs.image_uri }}",
+              "docker stop app || true",
+              "docker rm app || true",
+              "docker run -d --name app -p 8000:8000 -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped ${{ needs.build.outputs.image_uri }}"
+            ]'
 
       - name: Clean up untagged ECR images
         if: always()
