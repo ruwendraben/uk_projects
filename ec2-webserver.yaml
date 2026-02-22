@@ -144,7 +144,7 @@ Resources:
         HttpVersion: http2and3
         Origins:
           - Id: EC2Origin
-            DomainName: !GetAtt WebServerInstance.PublicDnsName
+            DomainName: !Sub '${AppElasticIP}'
             CustomOriginConfig:
               HTTPPort: !Ref ContainerPort
               OriginProtocolPolicy: http-only
