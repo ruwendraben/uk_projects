@@ -36,7 +36,41 @@ Parameters:
     Description: SSH key pair name for EC2 (e.g. london-ec2). Use the matching .pem to log in.
     Default: london-ec2
 
+  DomainName:
+    Type: String
+    Description: Domain name for the application (e.g., app.example.com). Leave empty skip DNS setup.
+    Default: ""
+
+  HostedZoneId:
+    Type: String
+    Description: Route 53 Hosted Zone ID for your domain. Leave empty to skip DNS setup.
+    Default: ""
+
+Conditions:
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+
 Resources:
+  # Static Elastic IP for EC2
+  AppElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: webserver-eip
+
+  # DNS Record pointing to Elastic IP
+  AppDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      TTL: 300
+      ResourceRecords:
+        - !Ref AppElasticIP
+
   # Security group for EC2 - allow app port from ALB + SSH for login
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -126,6 +160,8 @@ Resources:
           GroupSet:
             - !Ref EC2SecurityGroup
           SubnetId: !Ref SubnetId
+      # Associate the Elastic IP
+      EipAllocationId: !GetAtt AppElasticIP.AllocationId
       UserData:
         Fn::Base64:
           Fn::Sub:
@@ -199,6 +235,21 @@ Resources:
       Protocol: HTTP
 
 Outputs:
+  ElasticIP:
+    Description: Static IP address for EC2 instance (free tier friendly)
+    Value: !Ref AppElasticIP
+    Export:
+      Name: !Sub '${AWS::StackName}-ElasticIP'
+
+  DirectAppURL:
+    Description: Direct access via Elastic IP (no ALB)
+    Value: !Sub 'http://${AppElasticIP}:${ContainerPort}'
+
+  AppDomain:
+    Condition: HasDomain
+    Description: Access app via custom domain
+    Value: !Sub 'http://${DomainName}:${ContainerPort}'
+
   LoadBalancerDNS:
     Description: ALB DNS name - use this URL to access your app
     Value: !GetAtt WebServerALB.DNSName
@@ -206,7 +257,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ALBDNS'
 
   LoadBalancerURL:
-    Description: Full URL to access the app (HTTP)
+    Description: Full URL to access the app via ALB (HTTP)
     Value: !Sub 'http://${WebServerALB.DNSName}'
     Export:
       Name: !Sub '${AWS::StackName}-ALBURL'
