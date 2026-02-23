@@ -234,8 +234,6 @@ jobs:
           echo "VPC: $VPC_ID, Subnets: ${SUBNETS[0]} ${SUBNETS[1]}"
 
       - name: Deploy CloudFormation stack (EC2 + RDS PostgreSQL)
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD || 'GeneratedPass123!Secure' }}
         run: |
           aws cloudformation deploy \
             --template-file ec2-webserver.yaml \

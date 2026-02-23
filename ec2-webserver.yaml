@@ -44,8 +44,6 @@ Resources:
     Properties:
       Description: RDS database password
       GenerateSecretString:
-        SecretStringTemplate: '{"username": "dbadmin"}'
-        GenerateStringKey: password
         PasswordLength: 32
         ExcludeCharacters: '"@/\'
 
@@ -155,7 +153,6 @@ Resources:
   # RDS PostgreSQL Database
   AppDatabase:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Snapshot
     Properties:
       AllocatedStorage: '20'
       DBInstanceClass: db.t3.micro
@@ -163,7 +160,7 @@ Resources:
       EngineVersion: '15'
       DBName: abc_db
       MasterUsername: dbadmin
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}}}'
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
@@ -195,13 +192,13 @@ Resources:
               #!/bin/bash
               set -e
               yum update -y
-              yum install -y docker jq
+              yum install -y docker
               systemctl enable docker
               systemctl start docker
               
               # Fetch secrets from Secrets Manager
               ADMIN_PASS=$(aws secretsmanager get-secret-value --secret-id ${AdminSecret} --region ${AWS::Region} --query SecretString --output text)
-              DB_PASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecret} --region ${AWS::Region} --query SecretString --output text | jq -r '.password')
+              DB_PASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecret} --region ${AWS::Region} --query SecretString --output text)
               
               aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               docker pull ${ImageUri}
