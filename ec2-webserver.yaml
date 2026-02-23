@@ -28,6 +28,12 @@ Parameters:
     Description: SSH key pair name for EC2 (e.g. london-ec2). Use the matching .pem to log in.
     Default: london-ec2
 
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: PostgreSQL database master password
+    MinLength: 8
+
 Resources:
   # Static Elastic IP for EC2
   AppElasticIP:
@@ -58,6 +64,22 @@ Resources:
       Tags:
         - Key: Name
           Value: webserver-ec2-sg
+
+  # Security group for RDS PostgreSQL
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: EC2 to database
+      Tags:
+        - Key: Name
+          Value: webserver-db-sg
 
   # IAM role for EC2 - pull images from ECR
   EC2Role:
@@ -95,6 +117,43 @@ Resources:
         - !Ref EC2Role
       InstanceProfileName: !Sub 'webserver-ec2-profile-${AWS::StackName}'
 
+  # RDS PostgreSQL Database Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS PostgreSQL
+      SubnetIds:
+        - !Ref SubnetId
+      Tags:
+        - Key: Name
+          Value: webserver-db-subnet-group
+
+  # RDS PostgreSQL Database
+  AppDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: '15.4'
+      DBName: abc_db
+      MasterUsername: dbadmin
+      MasterUserPassword: !Ref DBPassword
+      VpcSecurityGroupIds:
+        - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      StorageType: gp2
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      MultiAZ: false
+      StorageEncrypted: false
+      EnableIAMDatabaseAuthentication: false
+      Tags:
+        - Key: Name
+          Value: webserver-db
+
   # EC2 instance - t3.micro (free tier eligible in eu-west-2)
   WebServerInstance:
     Type: AWS::EC2::Instance
@@ -121,9 +180,19 @@ Resources:
               systemctl start docker
               aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               docker pull ${ImageUri}
-              docker run -d --name app -p ${Port}:${Port} -e DJANGO_SETTINGS_MODULE=webserver_project.settings --restart unless-stopped ${ImageUri}
+              docker run -d --name app -p ${Port}:${Port} \
+                -e DJANGO_SETTINGS_MODULE=webserver_project.settings \
+                -e DB_ENGINE=django.db.backends.postgresql \
+                -e DB_NAME=abc_db \
+                -e DB_USER=dbadmin \
+                -e DB_PASSWORD=${DBPass} \
+                -e DB_HOST=${DBHost} \
+                -e DB_PORT=5432 \
+                --restart unless-stopped ${ImageUri}
             - ImageUri: !Ref ContainerImageUri
               Port: !Ref ContainerPort
+              DBPass: !Ref DBPassword
+              DBHost: !GetAtt AppDatabase.Endpoint.Address
       Tags:
         - Key: Name
           Value: webserver-ec2
@@ -145,6 +214,22 @@ Outputs:
   DirectAppURL:
     Description: Direct access via Elastic IP
     Value: !Sub 'http://${AppElasticIP}:${ContainerPort}'
+
+  DatabaseEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt AppDatabase.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseEndpoint'
+
+  DatabasePort:
+    Description: RDS PostgreSQL port
+    Value: 5432
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabasePort'
+
+  DatabaseName:
+    Description: Database name
+    Value: abc_db
 
   EC2InstanceId:
     Description: EC2 instance ID
