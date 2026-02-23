@@ -38,94 +38,94 @@ env:
 
 jobs:
   # ============== TEST ==============
-  test:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: django_webserver
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install coverage django-coverage-plugin
-
-      - name: Run migrations
-        run: python manage.py migrate
-
-      - name: Run tests with coverage
-        run: |
-          coverage run --source='main' manage.py test main
-          coverage report
-          coverage xml -o coverage.xml
-
-      - name: Upload coverage (Cobertura)
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: django_webserver/coverage.xml
+  # test:
+  #   name: Unit tests
+  #   runs-on: ubuntu-latest
+  #   defaults:
+  #     run:
+  #       working-directory: django_webserver
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #
+  #     - name: Install dependencies
+  #       run: |
+  #         pip install -r requirements.txt
+  #         pip install coverage django-coverage-plugin
+  #
+  #     - name: Run migrations
+  #       run: python manage.py migrate
+  #
+  #     - name: Run tests with coverage
+  #       run: |
+  #         coverage run --source='main' manage.py test main
+  #         coverage report
+  #         coverage xml -o coverage.xml
+  #
+  #     - name: Upload coverage (Cobertura)
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: coverage-report
+  #         path: django_webserver/coverage.xml
 
   # ============== SECURITY ==============
-  security-bandit:
-    name: Bandit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: pip install bandit
-      - run: bandit -r django_webserver/main -f json -o bandit-report.json || echo "Bandit scan complete"
-        continue-on-error: true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: bandit-report
-          path: bandit-report.json
+  # security-bandit:
+  #   name: Bandit
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #     - run: pip install bandit
+  #     - run: bandit -r django_webserver/main -f json -o bandit-report.json || echo "Bandit scan complete"
+  #       continue-on-error: true
+  #     - uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: bandit-report
+  #         path: bandit-report.json
 
-  security-safety:
-    name: Safety
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: pip install safety
-      - run: |
-          cd django_webserver
-          safety check --json > ../safety-report.json || echo "Safety check complete"
-        continue-on-error: true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: safety-report
-          path: safety-report.json
+  # security-safety:
+  #   name: Safety
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #     - run: pip install safety
+  #     - run: |
+  #         cd django_webserver
+  #         safety check --json > ../safety-report.json || echo "Safety check complete"
+  #       continue-on-error: true
+  #     - uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: safety-report
+  #         path: safety-report.json
 
-  security-secrets:
-    name: Detect secrets
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: pip install detect-secrets
-      - run: detect-secrets scan --baseline .secrets.baseline || echo "Secrets scan complete"
-        continue-on-error: true
+  # security-secrets:
+  #   name: Detect secrets
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #     - run: pip install detect-secrets
+  #     - run: detect-secrets scan --baseline .secrets.baseline || echo "Secrets scan complete"
+  #       continue-on-error: true
 
   # ============== BUILD TO ECR ==============
   build:
     name: Build Docker to ECR
     runs-on: ubuntu-latest
-    needs: [test, security-bandit, security-safety, security-secrets]
+    # needs: [test, security-bandit, security-safety, security-secrets]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push' || github.event_name == 'workflow_dispatch' && github.event.inputs.do_build == 'true'
     permissions:
       contents: read

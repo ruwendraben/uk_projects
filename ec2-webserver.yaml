@@ -157,10 +157,10 @@ Resources:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     Properties:
-      AllocatedStorage: 20
+      AllocatedStorage: '20'
       DBInstanceClass: db.t3.micro
       Engine: postgres
-      EngineVersion: '15.4'
+      EngineVersion: '15'
       DBName: abc_db
       MasterUsername: dbadmin
       MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}'
@@ -169,11 +169,7 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       StorageType: gp2
       BackupRetentionPeriod: 7
-      PreferredBackupWindow: '03:00-04:00'
-      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
       MultiAZ: false
-      StorageEncrypted: false
-      EnableIAMDatabaseAuthentication: false
       Tags:
         - Key: Name
           Value: webserver-db
@@ -199,13 +195,13 @@ Resources:
               #!/bin/bash
               set -e
               yum update -y
-              yum install -y docker
+              yum install -y docker jq
               systemctl enable docker
               systemctl start docker
               
               # Fetch secrets from Secrets Manager
               ADMIN_PASS=$(aws secretsmanager get-secret-value --secret-id ${AdminSecret} --region ${AWS::Region} --query SecretString --output text)
-              DB_PASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecret} --region ${AWS::Region} --query 'SecretString' --output text | jq -r '.password')
+              DB_PASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecret} --region ${AWS::Region} --query SecretString --output text | jq -r '.password')
               
               aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               docker pull ${ImageUri}
@@ -215,10 +211,10 @@ Resources:
                 -e DB_ENGINE=django.db.backends.postgresql \
                 -e DB_NAME=abc_db \
                 -e DB_USER=dbadmin \
-                -e DB_PASSWORD=$DB_PASS \
+                -e DB_PASSWORD="${!DB_PASS}" \
                 -e DB_HOST=${DBHost} \
                 -e DB_PORT=5432 \
-                -e DJANGO_SUPERUSER_PASSWORD=$ADMIN_PASS \
+                -e DJANGO_SUPERUSER_PASSWORD="${!ADMIN_PASS}" \
                 --restart unless-stopped ${ImageUri}
             - ImageUri: !Ref ContainerImageUri
               Port: !Ref ContainerPort
