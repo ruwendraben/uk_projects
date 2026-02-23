@@ -28,13 +28,27 @@ Parameters:
     Description: SSH key pair name for EC2 (e.g. london-ec2). Use the matching .pem to log in.
     Default: london-ec2
 
-  DBPassword:
-    Type: String
-    NoEcho: true
-    Description: PostgreSQL database master password
-    MinLength: 8
-
 Resources:
+  # Auto-generate secure admin password
+  AdminPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Django admin superuser password
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  # Auto-generate secure database password
+  DBPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: RDS database password
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "dbadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
   # Static Elastic IP for EC2
   AppElasticIP:
     Type: AWS::EC2::EIP
@@ -81,7 +95,7 @@ Resources:
         - Key: Name
           Value: webserver-db-sg
 
-  # IAM role for EC2 - pull images from ECR
+  # IAM role for EC2 - pull images from ECR + read secrets
   EC2Role:
     Type: AWS::IAM::Role
     Properties:
@@ -107,6 +121,16 @@ Resources:
                 Action:
                   - ecr:GetAuthorizationToken
                 Resource: '*'
+        - PolicyName: SecretsManagerRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !GetAtt AdminPasswordSecret.Arn
+                  - !GetAtt DBPasswordSecret.Arn
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
@@ -139,7 +163,7 @@ Resources:
       EngineVersion: '15.4'
       DBName: abc_db
       MasterUsername: dbadmin
-      MasterUserPassword: !Ref DBPassword
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}'
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
@@ -178,20 +202,28 @@ Resources:
               yum install -y docker
               systemctl enable docker
               systemctl start docker
+              
+              # Fetch secrets from Secrets Manager
+              ADMIN_PASS=$(aws secretsmanager get-secret-value --secret-id ${AdminSecret} --region ${AWS::Region} --query SecretString --output text)
+              DB_PASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecret} --region ${AWS::Region} --query 'SecretString' --output text | jq -r '.password')
+              
               aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
               docker pull ${ImageUri}
+              
               docker run -d --name app -p ${Port}:${Port} \
                 -e DJANGO_SETTINGS_MODULE=webserver_project.settings \
                 -e DB_ENGINE=django.db.backends.postgresql \
                 -e DB_NAME=abc_db \
                 -e DB_USER=dbadmin \
-                -e DB_PASSWORD=${DBPass} \
+                -e DB_PASSWORD=$DB_PASS \
                 -e DB_HOST=${DBHost} \
                 -e DB_PORT=5432 \
+                -e DJANGO_SUPERUSER_PASSWORD=$ADMIN_PASS \
                 --restart unless-stopped ${ImageUri}
             - ImageUri: !Ref ContainerImageUri
               Port: !Ref ContainerPort
-              DBPass: !Ref DBPassword
+              AdminSecret: !Ref AdminPasswordSecret
+              DBSecret: !Ref DBPasswordSecret
               DBHost: !GetAtt AppDatabase.Endpoint.Address
       Tags:
         - Key: Name

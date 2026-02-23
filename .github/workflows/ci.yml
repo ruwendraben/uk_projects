@@ -234,6 +234,8 @@ jobs:
           echo "VPC: $VPC_ID, Subnets: ${SUBNETS[0]} ${SUBNETS[1]}"
 
       - name: Deploy CloudFormation stack (EC2 + RDS PostgreSQL)
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD || 'GeneratedPass123!Secure' }}
         run: |
           aws cloudformation deploy \
             --template-file ec2-webserver.yaml \
@@ -244,7 +246,6 @@ jobs:
               VpcId=${{ steps.network.outputs.vpc_id }} \
               SubnetId=${{ steps.network.outputs.subnet1 }} \
               KeyName=${{ env.EC2_KEY_NAME }} \
-              DBPassword=${{ secrets.DB_PASSWORD }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 
